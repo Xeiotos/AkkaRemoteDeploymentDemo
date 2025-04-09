@@ -1,0 +1,6 @@
+@Deployer_HostAddress = http://localhost:5126
+
+POST {{Deployer_HostAddress}}/deploy/
+Accept: application/json
+
+###
