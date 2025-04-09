@@ -4,3 +4,9 @@ POST {{Deployer_HostAddress}}/deploy/
 Accept: application/json
 
 ###
+
+POST {{Deployer_HostAddress}}/deploy-intermediate/
+Accept: application/json
+
+###
+

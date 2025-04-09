@@ -7,9 +7,13 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <PackageReference Include="Akka.Cluster.Hosting" Version="1.5.40" />
-      <PackageReference Include="Akka.Logger.Serilog" Version="1.5.25" />
-      <PackageReference Include="Serilog.Sinks.Console" Version="6.0.1-dev-00953" />
+        <PackageReference Include="Akka.Serialization.Hyperion" Version="1.5.40"/>
+        <PackageReference Include="Akka.Cluster.Hosting" Version="1.5.40"/>
+        <PackageReference Include="Akka.Logger.Serilog" Version="1.5.25"/>
+        <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.11.2" />
+        <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.11.2" />
+        <PackageReference Include="Phobos.Hosting" Version="2.8.3" />
+        <PackageReference Include="Serilog.Sinks.Console" Version="6.0.1-dev-00953"/>
     </ItemGroup>
 
 </Project>

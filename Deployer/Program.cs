@@ -1,12 +1,15 @@
 using Akka.Actor;
-using Akka.Actor.Dsl;
 using Akka.Cluster.Hosting;
+using Akka.DependencyInjection;
 using Akka.Hosting;
+using Akka.Hosting.Configuration;
 using Akka.Logger.Serilog;
 using Akka.Remote.Hosting;
+using Akka.Serialization;
 using Common;
+using Deployer;
+using Phobos.Hosting;
 using Serilog;
-using Serilog.Events;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,16 +22,20 @@ var loggerConfiguration = new LoggerConfiguration()
     .MinimumLevel.Debug()
     .Enrich.FromLogContext()
     .WriteTo.Console(
-        outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}][Thread {Thread}][{LogSource}] {Message:lj}{NewLine}{Exception}");
+        outputTemplate:
+        "[{Timestamp:HH:mm:ss} {Level:u3}][Thread {Thread}][{LogSource}] {Message:lj}{NewLine}{Exception}");
 
 Log.Logger = loggerConfiguration
     .CreateLogger();
 
 Log.Logger.Information("Logging initialized");
 
+var akkaConfig = builder.Configuration.GetSection("akka").ToHocon();
+
 builder.Services.AddAkka("deployer", (configurationBuilder, sp) =>
 {
     configurationBuilder
+        .WithCustomSerializer("hyperion", [typeof(object)], actorSystem => new HyperionSerializer(actorSystem))
         .WithRemoting(new RemoteOptions
         {
             HostName = "localhost",
@@ -40,12 +47,7 @@ builder.Services.AddAkka("deployer", (configurationBuilder, sp) =>
             SplitBrainResolver = null,
             LogInfo = true,
             MinimumNumberOfMembers = 1,
-            FailureDetector = new PhiAccrualFailureDetectorOptions(),
-            SeedNodes =
-            [
-                "akka.tcp://deployer@localhost:8080",
-                "akka.tcp://deployer@localhost:8081"
-            ]
+            FailureDetector = null
         })
         .ConfigureLoggers(loggerConfigBuilder =>
         {
@@ -54,8 +56,27 @@ builder.Services.AddAkka("deployer", (configurationBuilder, sp) =>
             loggerConfigBuilder.AddLogger<SerilogLogger>();
             loggerConfigBuilder.WithDefaultLogMessageFormatter<SerilogLogMessageFormatter>();
         })
-        .WithSingleton<RoundRobinDeployer>(nameof(RoundRobinDeployer), Props.Create<RoundRobinDeployer>());
+        .WithActors((system, registry) =>
+        {
+            var roundRobinDeployer = system.ActorOf(
+                Props.Create(() => new Common.DeployerActor()),
+                nameof(Common.DeployerActor)
+            );
+
+            registry.Register<Common.DeployerActor>(roundRobinDeployer);
+            
+            var deploymentActor = system.ActorOf(
+                DependencyResolver.For(system).Props<IntermediateActor>(),
+                nameof(IntermediateActor)
+            );
+            
+            registry.Register<IntermediateActor>(deploymentActor);
+        })
+        .WithPhobos(AkkaRunMode.AkkaCluster)
+        .AddHocon(akkaConfig, HoconAddMode.Replace);
 });
+
+builder.Services.AddOpenTelemetry("deployer");
 
 var app = builder.Build();
 
@@ -68,19 +89,30 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+// This works, as there is no current Activity
 app.MapPost("/deploy", (ActorRegistry reg) =>
     {
-        var deployer = reg.Get<RoundRobinDeployer>();
-        var helloActorProps = Props.Create(() => new HelloActor());
+        var deployer = reg.Get<Common.DeployerActor>();
+        var helloActorProps = Props.Create(() => new HelloAndDieActor());
 
-        deployer.Tell(new RoundRobinDeployer.DeployActorCommand(
-            helloActorProps, "hello-actor", "test"
+        deployer.Tell(new Common.DeployerActor.DeployActorCommand(
+            helloActorProps, "hello-actor", new HelloAndDieActor.SayHelloAndDie()
         ));
     })
     .WithName("Deploy")
     .WithOpenApi();
 
+// This fails, as there is a current Activity
+app.MapPost("/deploy-intermediate", (ActorRegistry reg) =>
+    {
+        var deployer = reg.Get<IntermediateActor>();
+        var helloActorProps = Props.Create(() => new HelloAndDieActor());
+
+        deployer.Tell(new Common.DeployerActor.DeployActorCommand(
+            helloActorProps, "hello-actor", new HelloAndDieActor.SayHelloAndDie()
+        ));
+    })
+    .WithName("Deploy-Intermediate")
+    .WithOpenApi();
+
 app.Run();
-
-public record Request();
-

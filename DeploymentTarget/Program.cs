@@ -1,10 +1,12 @@
-using Akka.Actor;
 using Akka.Cluster.Hosting;
 using Akka.Hosting;
+using Akka.Hosting.Configuration;
 using Akka.Logger.Serilog;
 using Akka.Remote.Hosting;
-using Common;
+using Akka.Serialization;
+using Phobos.Hosting;
 using Serilog;
+using Common;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,9 +26,12 @@ Log.Logger = loggerConfiguration
 
 Log.Logger.Information("Logging initialized");
 
+var akkaConfig = builder.Configuration.GetSection("akka").ToHocon();
+
 builder.Services.AddAkka("deployer", (configurationBuilder, sp) =>
 {
     configurationBuilder
+        .WithCustomSerializer("hyperion", [typeof(object)], actorSystem => new HyperionSerializer(actorSystem))
         .WithRemoting(new RemoteOptions
         {
             HostName = "localhost",
@@ -38,12 +43,7 @@ builder.Services.AddAkka("deployer", (configurationBuilder, sp) =>
             SplitBrainResolver = null,
             LogInfo = true,
             MinimumNumberOfMembers = 1,
-            FailureDetector = new PhiAccrualFailureDetectorOptions(),
-            SeedNodes =
-            [
-                "akka.tcp://deployer@localhost:8080",
-                "akka.tcp://deployer@localhost:8081"
-            ]
+            FailureDetector = null
         })
         .ConfigureLoggers(loggerConfigBuilder =>
         {
@@ -52,8 +52,12 @@ builder.Services.AddAkka("deployer", (configurationBuilder, sp) =>
             loggerConfigBuilder.AddLogger<SerilogLogger>();
             loggerConfigBuilder.WithDefaultLogMessageFormatter<SerilogLogMessageFormatter>();
         })
-        .WithSingleton<RoundRobinDeployer>(nameof(RoundRobinDeployer), Props.Create<RoundRobinDeployer>());
+        .WithPhobos(AkkaRunMode.AkkaCluster)
+        .AddHocon(akkaConfig, HoconAddMode.Replace);
+    //.WithSingleton<RoundRobinDeployer>(nameof(RoundRobinDeployer), Props.Create<RoundRobinDeployer>());
 });
+
+builder.Services.AddOpenTelemetry("deployment-target");
 
 var app = builder.Build();
 
